@@ -1,0 +1,122 @@
+M-Pesa Daraja Gateway (C2B & B2C Node.js / TypeScript Integration)
+
+A production-ready, highly secure full-stack M-Pesa payment gateway built with Node.js, Express.js, TypeScript, and MongoDB (Mongoose). This service handles both Customer-to-Business (C2B / STK Push) transactions and Business-to-Customer (B2C / Bulk Disbursement) payouts with built-in asynchronous reconciliation, webhook dispatchers, rate-limiting protection, and RSA credential security.
+🚀 Core Features & Architecture
+1. Customer-to-Business (C2B / STK Push)
+
+    Initiation: Generates cryptographically secure timestamps and passwords (Buffer.from(Shortcode + Passkey + Timestamp).toString("base64")) to trigger STK Push requests.
+
+    Authentication: Automated OAuth token retrieval with custom Incapsula firewall user-agent and header evasion safeguards.
+
+    Callbacks: Secure webhook receivers (/api/v1/mpesa/callback) handling successful payments, user cancellations (1032), and failures, complete with M-Pesa receipt extraction.
+
+    Reconciliation Worker: A scheduled background cron job (node-cron) that periodically scans stale PENDING transactions, queries Safaricom's status endpoint, and synchronizes local records.
+
+    Spike Arrest Protection: Throttled query loops (6-second pacing delays and batch caps) to prevent Safaricom API rate-limiting (SpikeArrestViolation).
+
+2. Business-to-Customer (B2C / Bulk Disbursement)
+
+    Secure Payouts: Implements RSA PKCS1 v1.5 public key encryption for SecurityCredential generation using Safaricom's official developer certificate (Buffer-based reading to prevent operator account locks/Error 8006).
+
+    Asynchronous Webhooks: Dual callback endpoints for transaction results (/api/v1/mpesa/b2c-result) and queue timeouts (/api/v1/mpesa/b2c-timeout).
+
+    Multi-Tenant Routing: Maps internal transaction IDs (internalTxId) back to client-specific callback URLs to notify dependent microservices (e.g., Hostelix, Lernesis) upon successful fund disbursement.
+
+📁 Project Structure
+Plaintext
+
+Backend/
+├── src/
+│   ├── configs/             # Environment parser & MongoDB connection setup
+│   ├── Controllers/
+│   │   ├── B2C_controllers/ # B2C callback and timeout handlers
+│   │   └── C2B_controllers/ # STK push, payment callback & query routers
+│   ├── Models/              # Mongoose schemas for transactions
+│   ├── security/            # OAuth token generation & RSA B2C encryption
+│   ├── services/            # Daraja API service calls & webhook dispatchers
+│   ├── types/               # TypeScript interfaces and data contracts
+│   ├── workers/             # Background cron reconciliation jobs
+│   └── Server.js            # Express app bootstrap, helmet, CORS & graceful shutdown
+├── .env                     # Environment variables
+└── package.json
+
+⚙️ Environment Variables (.env)
+
+Create a .env file in your root directory matching the following configuration:
+Code snippet
+
+# Server Configuration
+SERVER_PORT=8000
+ENVIRONMENT=Development
+CORS_ORIGINS=http://localhost:3000,https://yourdomain.com
+
+# Database
+DATABASE_URL=mongodb://localhost:27017/mpesa_gateway
+
+# Safaricom C2B Credentials
+CONSUMER_KEY=your_sandbox_consumer_key
+CONSUMER_SECRET=your_sandbox_consumer_secret
+SHORT_CODE=174379
+PASSKEY=your_stk_passkey
+STK_PUSH_URL=https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest
+PAYMENT_STATUS_QUERY_URL=https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query
+URL_ACCESS_TOKEN_PARSER=https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials
+
+# Safaricom B2C Credentials
+B2C_INITIATOR_NAME=your_b2c_initiator_name
+B2C_INITIATOR_PASSWORD=your_b2c_initiator_password
+B2C_SHORT_CODE=your_b2c_shortcode
+B2C_PAYOUT_URL=https://sandbox.safaricom.co.ke/mpesa/b2c/v1/paymentrequest
+
+# Webhook URLs (Exposed via ngrok or production domain)
+PAYMENT_CALLBACK_URL=https://your-domain.ngrok-free.dev/api/v1/mpesa/callback
+B2C_RESULT_URL=https://your-domain.ngrok-free.dev/api/v1/mpesa/b2c-result
+B2C_QUEUE_TIMEOUT_URL=https://your-domain.ngrok-free.dev/api/v1/mpesa/b2c-timeout
+
+# Security
+JWT_SECRET=your_jwt_secret_key
+
+🛠️ Installation & Running
+
+    Install Dependencies:
+    Bash
+
+    npm install
+
+    Run in Development Mode (with TypeScript compilation & nodemon):
+    Bash
+
+    npm run dev
+
+    Build for Production:
+    Bash
+
+    npm run build
+    npm start
+
+🔌 API Endpoints Reference
+C2B Endpoints
+
+    Initiate STK Push: POST /api/v1/stkpush
+
+        Payload: { phoneNumber, amount, accountReference, internalTxId, clientCallbackUrl, serviceName }
+
+    STK Push Callback: POST /api/v1/mpesa/callback (Called by Safaricom)
+
+    Manual / Programmatic Query: POST /api/v1/query/payments
+
+        Payload: { PaymentId, identifierType: "internalTxId" | "checkoutRequestID", verifiedServiceName }
+
+B2C Endpoints
+
+    B2C Result Callback: POST /api/v1/mpesa/b2c-result (Called by Safaricom)
+
+    B2C Timeout Callback: POST /api/v1/mpesa/b2c-timeout (Called by Safaricom)
+
+🔒 Security & Reliability Measures
+
+    Incapsula Firewall Bypass: Outgoing fetch calls include standard browser headers (User-Agent, Accept: application/json) to prevent 403 HTML challenge blocks.
+
+    Exact Optional Property Compliance: Strict TypeScript configurations (exactOptionalPropertyTypes) enforced across database models and API payloads.
+
+    Graceful Shutdown: Intercepts SIGTERM and SIGINT signals to safely close active HTTP connections and flush database pools without dropping requests.
